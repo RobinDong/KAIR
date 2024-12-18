@@ -9,7 +9,7 @@ import random
 from scipy import ndimage
 import scipy
 import scipy.stats as ss
-from scipy.interpolate import interp2d
+from scipy.interpolate import RegularGridInterpolator
 from scipy.linalg import orth
 
 
@@ -116,13 +116,21 @@ def shift_pixel(x, sf, upper_left=True):
     x1 = np.clip(x1, 0, w-1)
     y1 = np.clip(y1, 0, h-1)
 
-    if x.ndim == 2:
-        x = interp2d(xv, yv, x)(x1, y1)
-    if x.ndim == 3:
-        for i in range(x.shape[-1]):
-            x[:, :, i] = interp2d(xv, yv, x[:, :, i])(x1, y1)
+    xv_grid, yv_grid = np.meshgrid(xv, yv, indexing='xy')
+    x1_grid, y1_grid = np.meshgrid(x1, y1, indexing='xy')
 
-    return x
+    if x.ndim == 2:
+        interpolator = RegularGridInterpolator((yv, xv), x)
+        new_coords = np.stack([y1_grid.ravel(), x1_grid.ravel()], axis=-1)
+        x_shifted = interpolator(new_coords).reshape(h, w)
+    if x.ndim == 3:
+        x_shifted = np.zeros_like(x)
+        for i in range(x.shape[-1]):
+            interpolator = RegularGridInterpolator((yv, xv), x[:, :, i])
+            new_coords = np.stack([y1_grid.ravel(), x1_grid.ravel()], axis=-1)
+            x_shifted[:, :, i] = interpolator(new_coords).reshape(h, w)
+
+    return x_shifted
 
 
 def blur(x, k):
@@ -192,7 +200,7 @@ def fspecial_gaussian(hsize, sigma):
     [x, y] = np.meshgrid(np.arange(-siz[1], siz[1]+1), np.arange(-siz[0], siz[0]+1))
     arg = -(x*x + y*y)/(2*std*std)
     h = np.exp(arg)
-    h[h < scipy.finfo(float).eps * h.max()] = 0
+    h[h < np.finfo(float).eps * h.max()] = 0
     sumh = h.sum()
     if sumh != 0:
         h = h/sumh
@@ -613,7 +621,7 @@ if __name__ == '__main__':
     img = util.imread_uint('utils/test.png', 3)
     img = util.uint2single(img)
     sf = 4
-    
+
     for i in range(20):
         img_lq, img_hq = degradation_bsrgan(img, sf=sf, lq_patchsize=72)
         print(i)
